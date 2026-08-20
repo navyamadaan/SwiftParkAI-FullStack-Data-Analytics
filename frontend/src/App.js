@@ -1,22 +1,26 @@
 import { useEffect, useState } from "react";
+
+// Component imports
 import { Login } from "./components/Login";
 import { SideBar } from "./components/SideBar";
 import { SpaceSelector } from "./components/SpaceSelector";
 import { ZoneAnalytics } from "./components/ZoneAnalytics";
 import { ParkingGrid } from "./components/ParkingGrid";
+import { AIChat } from "./components/AIChat";
 import { RealMap } from "./components/RealMap";
-import 'leaflet/dist/leaflet.css';
+import "leaflet/dist/leaflet.css";
 
-
-
+// Groups raw per-spot data into per-zone averages (turnover, dwell time, occupancy)
+// so the Zone Analytics tab and AI chat can work with summarized stats instead of 30 individual spots.
 function aggregateZoneData(mapBlueprint) {
   if (!mapBlueprint || mapBlueprint.length === 0) return [];
 
   const zoneGroups = {};
 
   mapBlueprint.forEach((spot) => {
-    const zone = spot.zone_name || 'Unknown Zone';
+    const zone = spot.zone_name || "Unknown Zone";
 
+    // Create a new group the first time we see this zone
     if (!zoneGroups[zone]) {
       zoneGroups[zone] = {
         zone_name: zone,
@@ -28,6 +32,7 @@ function aggregateZoneData(mapBlueprint) {
       };
     }
 
+    // Add this spot's numbers into its zone's running totals
     zoneGroups[zone].totalTurnover += spot.turnover || 0;
     zoneGroups[zone].totalTime += spot.total_time || 0;
     zoneGroups[zone].count += 1;
@@ -39,6 +44,7 @@ function aggregateZoneData(mapBlueprint) {
     }
   });
 
+  // Convert totals into averages, ready for charts/AI use
   return Object.values(zoneGroups).map((zone) => ({
     zone_name: zone.zone_name,
     avgTurnover: parseFloat((zone.totalTurnover / zone.count).toFixed(2)),
@@ -50,131 +56,138 @@ function aggregateZoneData(mapBlueprint) {
 }
 
 function App() {
-  // 1. Manage the authentication state
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  
-  // 2. Manage the parking data state
-  const [activeSpace, setActiveSpace] = useState('Space A');
-  const [isOccupied, setIsOccupied] = useState(false);
-  const[activeTab,setActiveTab]=useState('map');
-  const [mapBlueprint , setMapBlueprint] = useState([]);
-  const [parkingData, setParkingData]= useState([]);
-  const spaceList = ['Space A', 'Space B', 'Space C'];
-  const [viewMode, setViewMode]= useState('grid');
+  // --- Auth state ---
+  // Reads localStorage on first load so refreshing the page doesn't log the user out
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    return localStorage.getItem("swiftpark_logged_in") === "true";
+  });
 
+  // --- Parking & UI state ---
+  const [activeSpace, setActiveSpace] = useState("Space A"); // which Space (A/B/C) is selected in Grid View
+  const [activeTab, setActiveTab] = useState("map");         // which sidebar tab is active: 'map' | 'analytics'
+  const [viewMode, setViewMode] = useState("grid");          // within the Map tab: 'grid' | 'map'
+  const [mapBlueprint, setMapBlueprint] = useState([]);      // spot data with lat/lng + cluster info (from CSV)
+  const [parkingData, setParkingData] = useState([]);        // live occupancy per spot (from MongoDB)
+  const spaceList = ["Space A", "Space B", "Space C"];
 
-    useEffect(() => {
-  const fetchMapData = async () => {
-    try {
-      const response = await fetch('http://localhost:9000/api/parking-stats');
-      const json = await response.json();
-      setMapBlueprint(json); // This state now contains lat, lng, and cluster names!
-    } catch (error) {
-      console.error("Error fetching bridge data:", error);
-    }
+  // Fetch geographic + clustering data once on load (doesn't change often, so no polling needed)
+  useEffect(() => {
+    const fetchMapData = async () => {
+      try {
+        const response = await fetch(`${process.env.REACT_APP_API_URL}/api/parking-stats`);
+        const json = await response.json();
+        setMapBlueprint(json); // Includes lat, lng, cluster, and zone name for every spot
+      } catch (error) {
+        console.error("Error fetching bridge data:", error);
+      }
+    };
+
+    fetchMapData();
+  }, []);
+
+  // Poll live occupancy every 5 seconds so the dashboard reflects real-time sensor data
+  useEffect(() => {
+    const fetchParkingStatus = async () => {
+      try {
+        const response = await fetch(`${process.env.REACT_APP_API_URL}/latest-status`);
+        const data = await response.json();
+        setParkingData(data);
+      } catch (err) {
+        console.error("Connection to Backend failed: ", err);
+      }
+    };
+
+    fetchParkingStatus(); // run once immediately on mount/login
+
+    const interval = setInterval(fetchParkingStatus, 5000);
+    return () => clearInterval(interval); // clean up polling when component unmounts
+  }, [isLoggedIn]);
+
+  // --- Auth gate: show Login screen until the user signs in ---
+  if (!isLoggedIn) {
+    return (
+      <Login
+        onLogin={() => {
+          localStorage.setItem("swiftpark_logged_in", "true");
+          setIsLoggedIn(true);
+        }}
+      />
+    );
+  }
+
+  const onLogout = () => {
+    localStorage.removeItem("swiftpark_logged_in");
+    setIsLoggedIn(false);
   };
 
-  fetchMapData();
-  // Set an interval if you want the clusters to update live
-}, []);
+  // Recalculated on every render from the latest mapBlueprint — cheap enough not to need memoization
+  const zoneAnalyticsData = aggregateZoneData(mapBlueprint);
 
-    useEffect(()=>{
-    // define the function
-    const fetchParkingStatus = async()=>{
-    try{
-      const response = await fetch('http://localhost:9000/latest-status');
-      const data = await response.json();
-      setParkingData(data);
-    }
-    catch(err){
-      console.error("Connection to Backend failed : ",err);
-    }
-  }
-  
-  // call it
-  fetchParkingStatus();
-
-  const interval = setInterval(fetchParkingStatus, 5000);
-
-  return () => clearInterval(interval);
-  }
-  , [isLoggedIn]  );    //this means only run it once  
-
-  // 3. Conditional Rendering: Gatekeeper
-  if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
-  }
-
-  const onLogout=()=>{
-    setIsLoggedIn(false);
-  }
-
-
-const zoneAnalyticsData = aggregateZoneData(mapBlueprint);
-console.log('Zone analytics:', zoneAnalyticsData);
-
-
-  // 4. Main Dashboard (Visible only after Sign In)
+  // --- Main dashboard (only reached once logged in) ---
   return (
-    <div className="flex h-screen bg-slate-900 text-white overflow-hidden">
-      {/* Navigation & Brand */}
-      <SideBar
-      onLogout={onLogout}
-      activeTab={activeTab}
-      setActiveTab={setActiveTab} />
+    <div className="flex h-screen bg-ink text-porcelain overflow-hidden font-body">
+      {/* Sidebar navigation */}
+      <SideBar onLogout={onLogout} activeTab={activeTab} setActiveTab={setActiveTab} />
 
       <main className="flex-1 p-8 overflow-y-auto">
+        {/* Page header, changes label based on active tab */}
         <header className="mb-8">
-          <h1 className="text-3xl font-bold italic">
-      {activeTab === 'map' ? 'Mall Operations Dashboard' : 'Zone Performance' }
-    </h1>
-    <p className="text-slate-400">Real-time IoT Telemetry for SwiftParkAI</p>
-  </header>
+          <span className="eyebrow">Live Telemetry</span>
+          <h1 className="text-3xl font-display font-semibold italic mt-1">
+            {activeTab === "map" ? "Mall Operations Dashboard" : "Zone Performance"}
+          </h1>
+          <p className="text-mist font-mono text-sm">real_time_iot // swiftpark_ai</p>
+        </header>
 
+        {/* ---- Live Map tab: Grid View or Map View ---- */}
+        {activeTab === "map" && (
+          <>
+            {/* Toggle between Grid View and Map View */}
+            <div className="inline-flex items-center gap-1 p-1 mb-6 rounded-xl bg-panel/60 border border-gold/10 backdrop-blur-xl">
+              <button
+                onClick={() => setViewMode("grid")}
+                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  viewMode === "grid"
+                    ? "bg-signal/10 text-signal border border-signal/30 shadow-[0_0_15px_rgba(79,216,196,0.1)]"
+                    : "text-mist hover:text-porcelain hover:bg-white/5"
+                }`}
+              >
+                Grid View
+              </button>
 
+              <button
+                onClick={() => setViewMode("map")}
+                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  viewMode === "map"
+                    ? "bg-signal/10 text-signal border border-signal/30 shadow-[0_0_15px_rgba(79,216,196,0.1)]"
+                    : "text-mist hover:text-porcelain hover:bg-white/5"
+                }`}
+              >
+                Map View
+              </button>
+            </div>
 
+            {/* Show either the card grid or the interactive map, depending on viewMode */}
+            {viewMode === "grid" ? (
+              <>
+                <SpaceSelector spaces={spaceList} activeSpace={activeSpace} setActiveSpace={setActiveSpace} />
+                <ParkingGrid activeSpace={activeSpace} parkingData={parkingData} zoneData={mapBlueprint} />
+              </>
+            ) : (
+              <RealMap data={mapBlueprint} />
+            )}
+          </>
+        )}
 
-  {/* LOGIC: Render content based on activeTab */}
-  {activeTab === 'map' && (
-    <>
-
-      <div className="view-controls">
-        <button onClick={()=> setViewMode('grid')} className={viewMode==='grid' ? 'active' : ''}>
-          Grid View
-        </button>
-
-        <button onClick={()=> setViewMode('map')} className={viewMode==='map' ? 'active' : ''}>
-          Map View
-        </button>
-      </div>
-
-      {viewMode === 'grid' ? 
-      (
-        <ParkingGrid data={parkingData} />
-      ) 
-        : 
-      (
-        <RealMap data={mapBlueprint} />
-      )}
-
-      <SpaceSelector
-      spaces={spaceList} 
-        activeSpace={activeSpace} 
-        setActiveSpace={setActiveSpace} 
-      />
-      <ParkingGrid 
-        activeSpace={activeSpace} 
-        parkingData={parkingData} 
-      />
-    </>
-  )}
-
-  {activeTab === 'analytics' && (
-    <ZoneAnalytics data={zoneAnalyticsData} />
-  )}
-
-      </main> 
-    </div>   
+        {/* ---- Zone Analytics tab: AI chat + charts ---- */}
+        {activeTab === "analytics" && (
+          <div className="space-y-8">
+            <AIChat />
+            <ZoneAnalytics data={zoneAnalyticsData} />
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
 

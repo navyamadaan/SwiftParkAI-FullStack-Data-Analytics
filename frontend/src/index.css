@@ -1,3 +1,48 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-ink text-porcelain font-body;
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(212, 164, 92, 0.04), transparent 40%),
+      radial-gradient(circle at 80% 80%, rgba(79, 216, 196, 0.05), transparent 40%);
+  }
+
+  h1, h2, h3 {
+    @apply font-display;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(212, 164, 92, 0.25);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(212, 164, 92, 0.4);
+  }
+}
+
+@layer components {
+  .eyebrow {
+    @apply font-mono text-[11px] tracking-[0.15em] uppercase text-signal/70;
+  }
+
+  .glass-panel {
+    @apply bg-panel/60 border border-gold/10 rounded-3xl backdrop-blur-xl;
+  }
+
+  .pulse-dot {
+    @apply relative inline-flex w-2 h-2 rounded-full bg-signal;
+  }
+  .pulse-dot::before {
+    content: "";
+    @apply absolute inset-0 rounded-full bg-signal animate-pulse-ring;
+  }
+}

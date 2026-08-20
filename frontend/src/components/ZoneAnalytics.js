@@ -1,6 +1,6 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 
-const ZONE_COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6'];
+const ZONE_COLORS = ['#D4A45C', '#4FD8C4', '#8B95A7'];
 
 export const ZoneAnalytics = ({ data }) => {
   if (!data || data.length === 0) {
